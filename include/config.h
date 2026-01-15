@@ -1,15 +1,15 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define ADC_DEVICE_PATH    "/dev/ttyUSB1"
+#define ADC_DEVICE_PATH    "/tmp/ADC_A"
 #define ADC_BAUDRATE       115200
 
-#define PULSE_DEVICE_PATH  "/dev/ttyUSB0"
+#define PULSE_DEVICE_PATH  "/tmp/PULSE_A"
 #define PULSE_BAUDRATE     115200
 
 
 /* ===== デバイスパス ===== */
-#define CTRL_DEVICE_PATH   "/dev/ttyACM0"
+#define CTRL_DEVICE_PATH   "/tmp/CTRL_A"
 
 
 /* ===== 通信設定 バウンドレート ===== */
