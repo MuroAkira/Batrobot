@@ -10,10 +10,14 @@
 
 struct pulse_port {
     int fd;
+<<<<<<< HEAD
     char devpath[256];
 };
+=======
+};// pulse_port_tは整数型のファイルディスクリプタを持つ構造体
+>>>>>>> b1b2b1e76b49f3453593d3d4dd312e0eecb2269c
 
-static speed_t baud_to_flag(int baudrate)
+static speed_t baud_to_flag(int baudrate)// ボーレートを対応するtermiosの速度フラグに変換する関数
 {
     switch (baudrate) {
     case 115200: return B115200;
@@ -133,3 +137,53 @@ pulse_result_t pulse_write_locked(pulse_port_t* p, const uint8_t* data, size_t l
     ssize_t w = write(p->fd, data, len);
     return (w == (ssize_t)len) ? PULSE_OK : PULSE_ERR;
 }
+
+#include <string.h>
+#include <stdlib.h>
+
+/* data内の1ビット数を数える（dutyチェック用） */
+static unsigned long count_ones(const uint8_t* data, size_t len)
+{
+    unsigned long c = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t v = data[i];
+        for (int b = 0; b < 8; b++) c += (v >> b) & 1u;
+    }
+    return c;
+}
+
+pulse_result_t pulse_write(pulse_port_t* p, const uint8_t* data, size_t len)
+{
+    if (!p || p->fd < 0 || !data || len == 0) return PULSE_ERR;
+
+    /* === 実行時アーミング === */
+    const char* arm = getenv("THERMOPHONE_ARM");
+    if (!arm || strcmp(arm, "YES") != 0) {
+        /* アーミングされてなければ絶対に送らない */
+        return PULSE_ERR;
+    }
+
+    /* === コンパイル時アーミング === */
+#ifndef ENABLE_SOUND
+    return PULSE_ERR;
+#endif
+
+    /* === 安全: 送信長（duration）上限 === */
+    if (len > 512) { /* まずは極小に固定（後で段階的に増やす） */
+        return PULSE_ERR;
+    }
+
+    /* === 安全: duty上限 1%（ビット比率） === */
+    unsigned long ones = count_ones(data, len);
+    unsigned long bits = (unsigned long)len * 8ul;
+
+    /* duty(%) = ones*100/bits。1%を超えたら拒否 */
+    if (ones * 100ul > bits * 1ul) {
+        return PULSE_ERR;
+    }
+
+    /* ここまで来たら送信 */
+    ssize_t w = write(p->fd, data, len);
+    return (w == (ssize_t)len) ? PULSE_OK : PULSE_ERR;
+}
+

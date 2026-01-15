@@ -175,3 +175,78 @@ ADCポートからデータを読み込み
 /tmp/PULSE_B 側で Python ロガーを起動
 送信された 生バイト列（HEX）を直接確認
 duty を変えると 対応するビットパターンが変化することを確認
+
+実行手順
+1) 仮想ポートを起動（3つ・起動したまま）
+
+CTRL
+
+rm -f /tmp/CTRL_A /tmp/CTRL_B
+socat -d -d pty,raw,echo=0,perm=660,link=/tmp/CTRL_A pty,raw,echo=0,perm=660,link=/tmp/CTRL_B
+
+
+ADC
+
+rm -f /tmp/ADC_A /tmp/ADC_B
+socat -d -d pty,raw,echo=0,perm=660,link=/tmp/ADC_A pty,raw,echo=0,perm=660,link=/tmp/ADC_B
+
+
+PULSE
+
+rm -f /tmp/PULSE_A /tmp/PULSE_B
+socat -d -d pty,raw,echo=0,perm=660,link=/tmp/PULSE_A pty,raw,echo=0,perm=660,link=/tmp/PULSE_B
+
+2) 偽デバイスを起動（別ターミナル）
+
+CTRL_B（ENQ→ACK）
+
+python3 - <<'PY'
+import os, time
+fd=os.open("/tmp/CTRL_B", os.O_RDWR|os.O_NOCTTY)
+while True:
+    b=os.read(fd, 64)
+    if not b: time.sleep(0.01); continue
+    if b"\x05" in b: os.write(fd, b"\x06")
+PY
+
+
+ADC_B（ダミー送信）
+
+python3 - <<'PY'
+import os, time, struct
+fd=os.open("/tmp/ADC_B", os.O_RDWR|os.O_NOCTTY)
+x=0
+while True:
+    os.write(fd, struct.pack("<H", x & 0xFFFF))
+    x+=1; time.sleep(0.01)
+PY
+
+
+PULSE_B（ログ）
+
+python3 - <<'PY'
+import os, time, binascii
+fd=os.open("/tmp/PULSE_B", os.O_RDWR|os.O_NOCTTY)
+while True:
+    b=os.read(fd, 4096)
+    if not b: time.sleep(0.01); continue
+    print("PULSE HEX:", binascii.hexlify(b).decode())
+PY
+
+3) ビルド＆実行
+cd ~/batrobot/C
+make clean
+make
+./build/thermophone
+
+期待される結果
+
+端末：
+
+ENQ/ACK OK
+pulse_write OK bytes=...
+adc_read bytes=...
+
+
+PULSE_B 側に PULSE HEX: ... が表示される
+→ 本番相当のPULSEビット列が生成・送信できています（/tmp限定・安全）

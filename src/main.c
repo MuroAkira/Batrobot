@@ -30,6 +30,7 @@
 //     return 0;
 // }
 
+<<<<<<< HEAD
 /* ビルド確認用 */
 #include <stdio.h>
 #include <stdint.h>
@@ -84,7 +85,61 @@ int main(void)
 
     adc_close(adc);
     return 0;
-}
+=======
+/* 受信：ビルド確認用 */
+// #include <stdio.h>
+// #include <stdint.h>
+
+// #include "config.h"
+// #include "ctrl_port.h"
+// #include "adc_port.h"
+
+// int main(void)
+// {
+//     /* 制御ポート疎通（音なし） */
+//     ctrl_port_t* ctrl = ctrl_open(CTRL_DEVICE_PATH, CTRL_BAUDRATE);
+//     if (!ctrl) {
+//         printf("ctrl_open failed\n");
+//         return 1;
+//     }
+//     if (ctrl_enq(ctrl) != CTRL_OK) {
+//         printf("ENQ/ACK NG\n");
+//         ctrl_close(ctrl);
+//         return 1;
+//     }
+//     printf("ENQ/ACK OK\n");
+//     ctrl_close(ctrl);
+
+//     /* ADCポート（読むだけ、音なし） */
+//     adc_port_t* adc = adc_open(ADC_DEVICE_PATH, ADC_BAUDRATE);
+//     if (!adc) {
+//         printf("adc_open failed\n");
+//         return 1;
+//     }
+//     adc_flush(adc);
+
+//     uint8_t buf[256];
+//     int n = adc_read(adc, buf, sizeof(buf), 500);
+//     printf("adc_read bytes=%d\n", n);
+
+//     adc_close(adc);
+//     return 0;
+// }
 
 
 /* ビルド確認用 */
+
+
+/* 送信：ビルド確認用 */
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    fprintf(stderr,
+        "SAFETY LOCK: This program must NOT be executed.\n"
+        "Build is allowed, execution is forbidden in this phase.\n");
+    return 2;
+>>>>>>> b1b2b1e76b49f3453593d3d4dd312e0eecb2269c
+}
+/* 送信：ビルド確認用 */

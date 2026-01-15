@@ -7,7 +7,6 @@
 #define PULSE_DEVICE_PATH  "/tmp/PULSE_A"
 #define PULSE_BAUDRATE     115200
 
-
 /* ===== デバイスパス ===== */
 #define CTRL_DEVICE_PATH   "/tmp/CTRL_A"
 
