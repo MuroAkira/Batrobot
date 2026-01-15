@@ -9,7 +9,7 @@
 
 
 /* ===== デバイスパス ===== */
-#define CTRL_DEVICE_PATH   "/dev/ttyUSB2"
+#define CTRL_DEVICE_PATH   "/dev/ttyACM0"
 
 
 /* ===== 通信設定 バウンドレート ===== */
