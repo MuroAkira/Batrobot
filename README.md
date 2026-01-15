@@ -132,4 +132,46 @@ ADCデータ取得専用（FT2232H PortB）
 3.ADCデータとして取得できる
 4.取得データが「音として妥当」（波形/スペクトル/ファイル化）で確認できる
 
-確認
+
+・仮想環境での実行と確認
+① 今回やったこと
+実機（サーモホン基板）に危険な波形（duty 100%など）を出さずに
+本番相当のPULSEデータ（duty含む）をC側で生成
+送信フォーマットと送受信経路を安全に検証する
+
+実施した内容（整理）
+1. 仮想シリアル（偽基板）環境を構築
+socat を使って以下の仮想ポートを作成
+CTRL：/tmp/CTRL_A ↔ /tmp/CTRL_B
+ADC ：/tmp/ADC_A ↔ /tmp/ADC_B
+PULSE：/tmp/PULSE_A ↔ /tmp/PULSE_B
+
+実機デバイス（/dev/ttyUSB*）は一切使わない構成
+2. PULSE送信を「偽ポート限定」に安全ロック
+src/pulse_port.c を改修
+pulse_port 構造体に devpath を保持
+pulse_write_locked() で以下を強制：
+/tmp/PULSE_A のとき のみ送信許可
+実機ポートの場合は即エラー
+0xFF（8bitすべてHigh）を含むデータは送信拒否
+👉 これにより
+どんなバグがあっても duty100% 相当の波形が実機に出ない
+
+3. 本番相当のPULSE波形をCで生成
+pulse_gen_pfd() を新規実装
+入力：周波数（kHz）duty（%）
+出力：1bit = High/Low を詰めた生のビット列、1byte = 8パルス
+TPS-main.ino の考え方（pfd相当）をCで再現
+CRCやヘッダは PortA仕様上存在しないため生成しない
+
+4. main.c を拡張して本番相当フローを通した
+main.c で以下を実行：
+CTRLポートで ENQ → ACK 確認
+PULSE波形を生成して送信（偽PULSEのみ）
+ADCポートからデータを読み込み
+👉 実機なしで 本番と同じ処理順 を最後まで通過可能
+
+5. 偽PULSEで送信内容を可視化
+/tmp/PULSE_B 側で Python ロガーを起動
+送信された 生バイト列（HEX）を直接確認
+duty を変えると 対応するビットパターンが変化することを確認
