@@ -179,27 +179,20 @@ duty を変えると 対応するビットパターンが変化することを�
 実行手順
 1) 仮想ポートを起動（3つ・起動したまま）
 
-CTRL
-
+・CTRLのsocat
 rm -f /tmp/CTRL_A /tmp/CTRL_B
 socat -d -d pty,raw,echo=0,perm=660,link=/tmp/CTRL_A pty,raw,echo=0,perm=660,link=/tmp/CTRL_B
 
-
-ADC
-
+・ADCのsocat
 rm -f /tmp/ADC_A /tmp/ADC_B
 socat -d -d pty,raw,echo=0,perm=660,link=/tmp/ADC_A pty,raw,echo=0,perm=660,link=/tmp/ADC_B
 
-
-PULSE
-
+・PULSEのsocat
 rm -f /tmp/PULSE_A /tmp/PULSE_B
 socat -d -d pty,raw,echo=0,perm=660,link=/tmp/PULSE_A pty,raw,echo=0,perm=660,link=/tmp/PULSE_B
 
-2) 偽デバイスを起動（別ターミナル）
-
-CTRL_B（ENQ→ACK）
-
+2) 偽デバイスを起動
+・CTRL_B（ENQ→ACK）で実行するコマンド
 python3 - <<'PY'
 import os, time
 fd=os.open("/tmp/CTRL_B", os.O_RDWR|os.O_NOCTTY)
@@ -209,9 +202,7 @@ while True:
     if b"\x05" in b: os.write(fd, b"\x06")
 PY
 
-
-ADC_B（ダミー送信）
-
+・ADC_B（ダミー送信）で実行するコマンド
 python3 - <<'PY'
 import os, time, struct
 fd=os.open("/tmp/ADC_B", os.O_RDWR|os.O_NOCTTY)
@@ -221,9 +212,7 @@ while True:
     x+=1; time.sleep(0.01)
 PY
 
-
-PULSE_B（ログ）
-
+・PULSE_B（ログ）で実行するコマンド
 python3 - <<'PY'
 import os, time, binascii
 fd=os.open("/tmp/PULSE_B", os.O_RDWR|os.O_NOCTTY)
@@ -239,14 +228,11 @@ make clean
 make
 ./build/thermophone
 
-期待される結果
-
+・期待される結果
 端末：
-
 ENQ/ACK OK
 pulse_write OK bytes=...
 adc_read bytes=...
-
 
 PULSE_B 側に PULSE HEX: ... が表示される
 → 本番相当のPULSEビット列が生成・送信できています（/tmp限定・安全）

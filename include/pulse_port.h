@@ -24,3 +24,4 @@ pulse_result_t pulse_write_locked(pulse_port_t* p, const uint8_t* data, size_t l
 size_t pulse_gen_pfd(uint8_t* out, size_t out_bytes, int freq_khz, int duty_percent);
 
 #endif
+pulse_result_t pulse_write(pulse_port_t* p, const uint8_t* data, size_t len);

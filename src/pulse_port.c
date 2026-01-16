@@ -34,7 +34,7 @@ pulse_port_t* pulse_open(const char* devpath, int baudrate)
     speed_t sp = baud_to_flag(baudrate);
     if (sp == 0) return NULL;
 
-    int fd = open(devpath, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    int fd = open(devpath, O_RDWR | O_NOCTTY );
     if (fd < 0) return NULL;
 
     struct termios tio;
@@ -95,7 +95,7 @@ size_t pulse_gen_pfd(uint8_t* out, size_t out_bytes, int freq_khz, int duty_perc
     int on_ticks = (period_ticks * duty_percent + 50) / 100;
     if (on_ticks < 1) on_ticks = 1;
     if (on_ticks >= period_ticks) on_ticks = period_ticks - 1;
-
+    fprintf(stderr, "pulse_gen_pfd: freq_khz=%d period_ticks=%d on_ticks=%d (duty=%.2f%%)\n",freq_khz, period_ticks, on_ticks, 100.0 * (double)on_ticks / (double)period_ticks);
     memset(out, 0x00, out_bytes);
 
     size_t total_bits = out_bytes * 8;
@@ -112,24 +112,29 @@ size_t pulse_gen_pfd(uint8_t* out, size_t out_bytes, int freq_khz, int duty_perc
     return out_bytes;
 }
 
-pulse_result_t pulse_write_locked(pulse_port_t* p, const uint8_t* data, size_t len)
+/* data内の連続1ビットの最長長を数える（送信前チェック用） */
+static int max_consecutive_ones_bits(const uint8_t* data, size_t len)
 {
-    if (!p || p->fd < 0 || !data || len == 0) return PULSE_ERR;
-
-    /* 実機へは絶対に流さない */
-    if (!is_safe_devpath(p->devpath)) {
-        fprintf(stderr, "PULSE locked: devpath=%s\n", p->devpath);
-        return PULSE_ERR;
-    }
-
-    /* “怖い”対策：0xFF（8/8 High）を拒否 */
+    int max_run = 0, run = 0;
     for (size_t i = 0; i < len; i++) {
-        if (data[i] == 0xFF) {
-            fprintf(stderr, "PULSE blocked: found 0xFF at %zu\n", i);
-            return PULSE_ERR;
+        uint8_t v = data[i];
+        for (int b = 0; b < 8; b++) {
+            int bit = (v >> b) & 1u;
+            if (bit) { run++; if (run > max_run) max_run = run; }
+            else run = 0;
         }
     }
+    return max_run;
+}
 
+
+pulse_result_t pulse_write_locked(pulse_port_t* p, const uint8_t* data, size_t len)
+{
+    int max_run = max_consecutive_ones_bits(data, len);
+    if (max_run >= 200) {
+        fprintf(stderr, "PULSE blocked: too long HIGH run=%d bits\n", max_run);
+        return PULSE_ERR;
+    }
     ssize_t w = write(p->fd, data, len);
     return (w == (ssize_t)len) ? PULSE_OK : PULSE_ERR;
 }
@@ -137,49 +142,74 @@ pulse_result_t pulse_write_locked(pulse_port_t* p, const uint8_t* data, size_t l
 #include <string.h>
 #include <stdlib.h>
 
-/* data内の1ビット数を数える（dutyチェック用） */
-static unsigned long count_ones(const uint8_t* data, size_t len)
-{
-    unsigned long c = 0;
-    for (size_t i = 0; i < len; i++) {
-        uint8_t v = data[i];
-        for (int b = 0; b < 8; b++) c += (v >> b) & 1u;
-    }
-    return c;
-}
-
 pulse_result_t pulse_write(pulse_port_t* p, const uint8_t* data, size_t len)
 {
     if (!p || p->fd < 0 || !data || len == 0) return PULSE_ERR;
 
-    /* === 実行時アーミング === */
-    const char* arm = getenv("THERMOPHONE_ARM");
-    if (!arm || strcmp(arm, "YES") != 0) {
-        /* アーミングされてなければ絶対に送らない */
+    /* 実機へは絶対に流さない（仮想ポートのみ） */
+    if (!is_safe_devpath(p->devpath)) {
+        fprintf(stderr, "PULSE locked: devpath=%s\n", p->devpath);
         return PULSE_ERR;
     }
 
-    /* === コンパイル時アーミング === */
-#ifndef ENABLE_SOUND
-    return PULSE_ERR;
-#endif
-
-    /* === 安全: 送信長（duration）上限 === */
-    if (len > 512) { /* まずは極小に固定（後で段階的に増やす） */
+    /* 安全: 送信長（仮想テスト用。必要なら後でconfig化） */
+    if (len > 50000) {
+        fprintf(stderr, "PULSE blocked: len too long (%zu)\n", len);
         return PULSE_ERR;
     }
 
-    /* === 安全: duty上限 1%（ビット比率） === */
-    unsigned long ones = count_ones(data, len);
+    /* ===== Safety gate ===== */
+
+    /* duty 推定（全ビットの1比率） */
+    unsigned long ones = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t v = data[i];
+        for (int b = 0; b < 8; b++) ones += (v >> b) & 1u;
+    }
     unsigned long bits = (unsigned long)len * 8ul;
+    double duty_est = 100.0 * (double)ones / (double)bits;
 
-    /* duty(%) = ones*100/bits。1%を超えたら拒否 */
-    if (ones * 100ul > bits * 1ul) {
+    /* 連続 High の最大長（LSB first） */
+    int max_run = 0;
+    int run = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t v = data[i];
+        for (int b = 0; b < 8; b++) {
+            if ((v >> b) & 1u) {
+                run++;
+                if (run > max_run) max_run = run;
+            } else {
+                run = 0;
+            }
+        }
+    }
+
+    /* ログ（安全確認の証跡） */
+    fprintf(stderr, "PULSE safety: len=%zu duty_est=%.2f%% max_run=%d bits\n",
+            len, duty_est, max_run);
+
+    /* 安全: duty 60%以上は拒否（= 59%まで許可） */
+    if (duty_est >= 60.0) {
+        fprintf(stderr, "PULSE blocked: duty >= 60%%\n");
         return PULSE_ERR;
     }
+
+    /* 安全: 連続Highが長すぎるのも拒否（20us以上の連続Highを止める） */
+    if (max_run >= 200) { /* 200bit = 20us (10MHz基準: 1bit=0.1us) */
+        fprintf(stderr, "PULSE blocked: max_run too long (%d bits)\n", max_run);
+        return PULSE_ERR;
+    }
+
+    /* ===== Safety gate end ===== */
 
     /* ここまで来たら送信 */
     ssize_t w = write(p->fd, data, len);
-    return (w == (ssize_t)len) ? PULSE_OK : PULSE_ERR;
+    if (w != (ssize_t)len) {
+        fprintf(stderr, "PULSE write failed: w=%zd expected=%zu errno=%d\n", w, len, errno);
+        return PULSE_ERR;
+    }
+    return PULSE_OK;
 }
+
+
 

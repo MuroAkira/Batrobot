@@ -103,8 +103,39 @@ int main(void)
     if (!pbuf) { printf("malloc failed\n"); pulse_close(pulse); return 1; }
 
     pulse_gen_pfd(pbuf, pb, 40 /*kHz*/, 10 /*%*/);
+    /* DEBUG: duty推定（全体の1比率） */
+    unsigned long ones = 0;
+    for (size_t i = 0; i < pb; i++) {
+        uint8_t v = pbuf[i];
+        for (int b = 0; b < 8; b++) ones += (v >> b) & 1u;
+    }
+    unsigned long bits = (unsigned long)pb * 8ul;
+    printf("duty_est=%.2f%% (ones=%lu bits=%lu)\n", 100.0 * (double)ones / (double)bits, ones, bits);
 
-    if (pulse_write_locked(pulse, pbuf, pb) != PULSE_OK) {
+    /* ==== DEBUG: PULSE生データをファイルに保存 ==== */
+    FILE *fp = fopen("output/pulse_data/pulse_raw_test1.txt", "w");
+    if (fp) {
+        for (size_t i = 0; i < pb; i++) {
+            /* 16進で1byteずつ出力 */
+            fprintf(fp, "%02X", pbuf[i]);
+
+            /* 見やすさのため、16byteごとに改行 */
+            if ((i + 1) % 16 == 0) {
+                fprintf(fp, "\n");
+            } else {
+                fprintf(fp, " ");
+            }
+        }
+        fclose(fp);
+        printf("pulse_raw.txt written (%zu bytes)\n", pb);
+    } else {
+        perror("fopen pulse_raw.txt");
+    }
+    /* ==== DEBUG END ==== */
+
+
+
+    if (pulse_write(pulse, pbuf, pb) != PULSE_OK) {
         printf("pulse_write failed\n");
         free(pbuf);
         pulse_close(pulse);
