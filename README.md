@@ -236,3 +236,76 @@ adc_read bytes=...
 
 PULSE_B 側に PULSE HEX: ... が表示される
 → 本番相当のPULSEビット列が生成・送信できています（/tmp限定・安全）
+
+・20226/1/17 今日できたこと（成果）
+Raspberry Pi（Ubuntu 24.04）上で、Thermophone基板と3ポート通信が動作
+
+PortA /dev/ttyUSB0：パルス送信（音が出ること確認）
+
+PortB /dev/ttyUSB1：ADC受信（64ms = 256000 byte を安定取得）
+
+PortC /dev/ttyUSB2：コマンド（ENQ/ACK、ゲイン設定）
+
+パルス生成 → 送信 → ADC録音 → bin保存が main で1回の実行で完結
+
+ADCのbinを 仕様通りのバイト順（LH,LL,RH,RL）から正しく16bit化し、
+1MHz WAV化 + 48kHzへダウンサンプルして「音が入っている」ことを確認
+
+stdout のバッファでログが欠ける問題を stdbuf で回避し、ログ取得を安定化
+
+マイクゲイン g 300 を PortC から設定して録音レベルを改善
+
+2. 重要な仕様・前提（READMEに残すべきポイント）
+
+ADC設定：fs = 1MHz, データレートは 4 byte / sample（LH,LL,RH,RL）
+
+64ms録音の固定値：
+1,000,000 × 0.064 × 4 = 256,000 byte
+
+パルス長 pt は 送信バイト数 pb で決まる（10MHz基準：1bit=0.1µs、1byte=0.8µs）
+
+10ms = 12,500 byte
+
+40ms = 50,000 byte
+
+ログは printf がバッファされるので、基本は stdbuf付きで実行
+
+PortAは pulse_port.c の安全ロックで /dev/ttyUSB0のみ許可（実機誤送信防止）
+
+3. 変更した/追加したファイル（想定）
+
+最低限これを Git に入れるのがおすすめです。
+
+変更
+
+src/main.c
+
+g 300 を送る
+
+ADCスレッド開始 → パルス送信 → ADC待ち → adc_dump.bin 保存
+
+パルス設定（例：pb=12500 / 40kHz / duty=10）
+
+src/ctrl_port.c
+
+struct ctrl_port に devpath を追加（snprintf不整合修正）
+
+ctrl_send_line() を追加（g 300\n 送信用）
+
+include/ctrl_port.h
+
+ctrl_send_line() の宣言追加
+
+追加
+
+tools/adc_bin_to_wav.py
+
+bin（LH,LL,RH,RL）→ 正しく16bit化
+
+1MHz wav出力
+
+48kHz wav（確認用）出力
+
+docs/RUN_RPI.md（新規推奨）
+
+ビルド・実行手順、ポート確認、WAV化まで
