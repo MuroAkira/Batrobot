@@ -13,8 +13,7 @@ struct adc_port {
 static speed_t baud_to_flag(int baudrate)
 {
     switch (baudrate) {
-    case 115200: return B115200; /* ここは後で最適化。いまは足場 */
-    case 9600:   return B9600;
+    case 115200: return B115200; 
     default:     return 0;
     }
 }

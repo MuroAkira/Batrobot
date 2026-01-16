@@ -1,7 +1,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define ADC_DEVICE_PATH    "/tmp/ADC_A"
+#define ADC_DEVICE_PATH    "/dev/ttyUSB1"//実機
+// #define ADC_DEVICE_PATH    "/tmp/ADC_A" //仮想socatポート
 #define ADC_BAUDRATE       115200
 
 // #define PULSE_DEVICE_PATH  "/dev/tmp/PULSE_A"//仮想socatポート
