@@ -111,7 +111,7 @@ int main(void)
     /* ===== (B) パルス生成 ===== */
     size_t pb = 12500;              /* 40ms（あなたのデフォルト） */
     int freq_khz = 60;
-    int duty_percent = 10;           /* 鳴る安全値。0にすれば全LOW確認にも使える */
+    int duty_percent = 20;           /* 鳴る安全値。0にすれば全LOW確認にも使える */
 
     uint8_t* pbuf = (uint8_t*)malloc(pb);
     if (!pbuf) { printf("malloc failed\n"); return 1; }
