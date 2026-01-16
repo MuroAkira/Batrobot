@@ -23,9 +23,17 @@ static speed_t baud_to_flag(int baudrate)// ボーレートを対応するtermio
 
 static int is_safe_devpath(const char* p)
 {
-    /* “偽ポートだけ許可” ルール。ここが最重要。 */
-    return (p && strncmp(p, "/tmp/PULSE_", 11) == 0);
+    if (!p) return 0;
+
+    /* 仮想ポートも許可 */
+    if (strncmp(p, "/tmp/PULSE_", 11) == 0) return 1;
+
+    /* 実機テストはPortA(/dev/ttyUSB0)だけ許可 */
+    if (strcmp(p, "/dev/ttyUSB0") == 0) return 1;
+
+    return 0;
 }
+
 
 pulse_port_t* pulse_open(const char* devpath, int baudrate)
 {
@@ -86,7 +94,11 @@ size_t pulse_gen_pfd(uint8_t* out, size_t out_bytes, int freq_khz, int duty_perc
 {
     if (!out || out_bytes == 0) return 0;
     if (freq_khz < 1 || freq_khz > 5000) return 0;
-    if (duty_percent < 1 || duty_percent > 99) return 0;
+    if (duty_percent < 0 || duty_percent > 99) return 0;
+
+    if (duty_percent == 0) {
+    memset(out, 0x00, out_bytes);
+    return out_bytes;}
 
     /* 10MHz基準 → 1周期のtick数は 10000/freq_khz （0.1us単位） */
     int period_ticks = (10000 + freq_khz/2) / freq_khz;   /* 四捨五入 */
