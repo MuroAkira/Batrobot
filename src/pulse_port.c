@@ -10,12 +10,8 @@
 
 struct pulse_port {
     int fd;
-<<<<<<< HEAD
     char devpath[256];
 };
-=======
-};// pulse_port_tは整数型のファイルディスクリプタを持つ構造体
->>>>>>> b1b2b1e76b49f3453593d3d4dd312e0eecb2269c
 
 static speed_t baud_to_flag(int baudrate)// ボーレートを対応するtermiosの速度フラグに変換する関数
 {
