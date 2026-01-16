@@ -309,3 +309,32 @@ bin（LH,LL,RH,RL）→ 正しく16bit化
 docs/RUN_RPI.md（新規推奨）
 
 ビルド・実行手順、ポート確認、WAV化まで
+4. 実行手順（docs/READMEに貼る用）
+cd ~/batrobot/C
+make clean
+make
+
+# ログを確実に残す（stdoutバッファ対策）
+stdbuf -oL -eL ./build/thermophone 2>&1 | tee run.log
+
+# bin → wav（1MHz + 48kHz）
+python3 tools/adc_bin_to_wav.py \
+  -i output/adc_data/adc_dump.bin \
+  --in-rate 1000000 \
+  --out-rate 48000 \
+  -o1 output/adc_data/adc_dump_1MHz.wav \
+  -o2 output/adc_data/adc_dump_48k.wav
+
+aplay output/adc_data/adc_dump_48k.wav
+
+5. 今日の既知の注意点（次回のTODO）
+
+音量が小さい場合：
+
+pt（pb）を戻す（10ms→40ms）または duty を段階的に上げる
+
+g は 録音側の増幅であって、サーモホン出力自体は pb/duty 側
+
+main.c が複製連結されて壊れたことがあったので、Gitに上げる前に
+
+src/main.c が 1本のコードになっているか必ず確認
