@@ -113,7 +113,7 @@ int main(void)
     printf("duty_est=%.2f%% (ones=%lu bits=%lu)\n", 100.0 * (double)ones / (double)bits, ones, bits);
 
     /* ==== DEBUG: PULSE生データをファイルに保存 ==== */
-    FILE *fp = fopen("output/pulse_data/pulse_raw_test1.txt", "w");
+    FILE *fp = fopen("output/pulse_data/pulse_raw_test2.txt", "w");
     if (fp) {
         for (size_t i = 0; i < pb; i++) {
             /* 16進で1byteずつ出力 */
@@ -131,6 +131,30 @@ int main(void)
     } else {
         perror("fopen pulse_raw.txt");
     }
+
+    /* ==== DEBUG: PULSE生データを bit(0/1) で保存 ==== */
+    FILE *fb = fopen("output/pulse_data/pulse_raw_test2.txt", "w");
+    if (fb) {
+        size_t total_bits = pb * 8;
+        for (size_t bit = 0; bit < total_bits; bit++) {
+            size_t byte_i = bit / 8;
+            int bit_i = bit % 8;          /* LSB first */
+            int v = (pbuf[byte_i] >> bit_i) & 1;
+
+            fprintf(fb, "%d", v);
+
+            /* 見やすさ：100bit = 10us ごとに改行 */
+            if ((bit + 1) % 100 == 0) {
+                fprintf(fb, "\n");
+            }
+        }
+        fclose(fb);
+        printf("pulse_raw_bits.txt written (%zu bits)\n", total_bits);
+    } else {
+        perror("fopen pulse_raw_bits.txt");
+    }
+    /* ==== DEBUG END ==== */
+
     /* ==== DEBUG END ==== */
 
 
