@@ -74,4 +74,7 @@ ctrl_result_t ctrl_enq(ctrl_port_t* ctrl);
 
 ctrl_result_t ctrl_get_sampling_hz(ctrl_port_t* ctrl, uint32_t* hz_out);
 
+ctrl_result_t ctrl_send_line(ctrl_port_t* ctrl, const char* line);
+ctrl_result_t ctrl_get_errors(ctrl_port_t* ctrl, uint32_t* pulse_err, uint32_t* adc_err);
+
 #endif /* CTRL_PORT_H */

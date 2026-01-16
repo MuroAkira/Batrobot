@@ -98,21 +98,20 @@ int main(void)
     (void)system("mkdir -p output/pulse_data output/adc_data");
 
     /* ===== (A) CTRL疎通 ===== */
-    ctrl_port_t* ctrl = ctrl_open(CTRL_DEVICE_PATH, CTRL_BAUDRATE);
-    if (!ctrl) { printf("ctrl_open failed\n"); return 1; }
-
-    if (ctrl_enq(ctrl) != CTRL_OK) {
-        printf("ENQ/ACK NG\n");
-        ctrl_close(ctrl);
+    ctrl_port_t* c2 = ctrl_open(CTRL_DEVICE_PATH, CTRL_BAUDRATE);
+    if (!c2) { printf("ctrl_open failed (gain)\n"); return 1; }
+    if (ctrl_send_line(c2, "g 300\n") != CTRL_OK) {
+        printf("gain set failed\n");
+        ctrl_close(c2);
         return 1;
     }
-    printf("ENQ/ACK OK\n");
-    ctrl_close(ctrl);
+    ctrl_close(c2);
+    printf("AMP gain set: g=300\n");
 
     /* ===== (B) パルス生成 ===== */
     size_t pb = 50000;              /* 40ms（あなたのデフォルト） */
     int freq_khz = 40;
-    int duty_percent = 5;           /* 鳴る安全値。0にすれば全LOW確認にも使える */
+    int duty_percent = 10;           /* 鳴る安全値。0にすれば全LOW確認にも使える */
 
     uint8_t* pbuf = (uint8_t*)malloc(pb);
     if (!pbuf) { printf("malloc failed\n"); return 1; }

@@ -6,65 +6,52 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
+#include <sys/select.h>
+#include <stdio.h>
 
 /* 実体は .c に隠す（opaque） */
 struct ctrl_port {
     int fd;
+    char devpath[256];
 };
 
-/* ボーレート変換 受け取ったbaudrateを通信速度として設定*/
+/* ボーレート変換 受け取ったbaudrateを通信速度として設定 */
 static speed_t baud_to_flag(int baudrate)
 {
     switch (baudrate) {
     case 115200: return B115200;
-    case 9600:   return B9600;
     default:     return 0;  /* 未対応 */
     }
 }
 
 ctrl_port_t* ctrl_open(const char* devpath, int baudrate)
 {
-    int fd = -1;
+    if (!devpath) return NULL;
+
+    speed_t sp = baud_to_flag(baudrate);
+    if (sp == 0) return NULL;
+
+    /* PortC: コマンド送受信用なのでノンブロッキングにしない方が扱いやすい */
+    int fd = open(devpath, O_RDWR | O_NOCTTY);
+    if (fd < 0) return NULL;
+
     struct termios tio;
-    speed_t speed;
-    ctrl_port_t* ctrl = NULL;
-
-    if (!devpath) {
-        return NULL;
-    }
-
-    speed = baud_to_flag(baudrate);
-    if (speed == 0) {
-        return NULL;
-    }
-
-    /* ノンブロッキングで開く（安全） */
-    fd = open(devpath, O_RDWR | O_NOCTTY | O_NONBLOCK);
-    if (fd < 0) {
-        return NULL;
-    }
-
-    /* 現在設定を取得 */
     if (tcgetattr(fd, &tio) != 0) {
         close(fd);
         return NULL;
     }
 
-    /* 生モード相当（最低限） */
     cfmakeraw(&tio);
+    cfsetispeed(&tio, sp);
+    cfsetospeed(&tio, sp);
 
-    /* ボーレート設定 */
-    cfsetispeed(&tio, speed);
-    cfsetospeed(&tio, speed);
-
-    /* 8N1 */
     tio.c_cflag |= (CLOCAL | CREAD);
     tio.c_cflag &= ~PARENB;
     tio.c_cflag &= ~CSTOPB;
     tio.c_cflag &= ~CSIZE;
     tio.c_cflag |= CS8;
 
-    /* タイムアウト設定（read未使用だが安全のため） */
+    /* 受信待ちは select() で制御するので 0/0 でOK */
     tio.c_cc[VMIN]  = 0;
     tio.c_cc[VTIME] = 0;
 
@@ -73,42 +60,42 @@ ctrl_port_t* ctrl_open(const char* devpath, int baudrate)
         return NULL;
     }
 
-    /* ハンドル確保 */
-    ctrl = (ctrl_port_t*)malloc(sizeof(ctrl_port_t));
-    if (!ctrl) {
+    ctrl_port_t* c = (ctrl_port_t*)malloc(sizeof(ctrl_port_t));
+    if (!c) {
         close(fd);
         return NULL;
     }
-
-    ctrl->fd = fd;
-    return ctrl;
+    c->fd = fd;
+    snprintf(c->devpath, sizeof(c->devpath), "%s", devpath);
+    return c;
 }
 
 void ctrl_close(ctrl_port_t* ctrl)
 {
-    if (!ctrl) {
-        return;
-    }
-    if (ctrl->fd >= 0) {
-        close(ctrl->fd);
-    }
+    if (!ctrl) return;
+    if (ctrl->fd >= 0) close(ctrl->fd);
     free(ctrl);
 }
 
-#include <sys/select.h>
+/* 文字列コマンドを送る（例: "g 300\n", "e\n", "?\n"） */
+ctrl_result_t ctrl_send_line(ctrl_port_t* ctrl, const char* line)
+{
+    if (!ctrl || ctrl->fd < 0 || !line) return CTRL_ERR;
+    size_t len = strlen(line);
+    if (len == 0) return CTRL_ERR;
+
+    ssize_t w = write(ctrl->fd, line, len);
+    return (w == (ssize_t)len) ? CTRL_OK : CTRL_ERR;
+}
 
 ctrl_result_t ctrl_enq(ctrl_port_t* ctrl)
 {
-    if (!ctrl || ctrl->fd < 0) {
-        return CTRL_ERR;
-    }
+    if (!ctrl || ctrl->fd < 0) return CTRL_ERR;
 
     /* ENQ (0x05) */
     unsigned char enq = 0x05;
     ssize_t w = write(ctrl->fd, &enq, 1);
-    if (w != 1) {
-        return CTRL_ERR;
-    }
+    if (w != 1) return CTRL_ERR;
 
     /* ACK (0x06) を最大 500ms 待つ */
     fd_set rfds;
@@ -120,20 +107,14 @@ ctrl_result_t ctrl_enq(ctrl_port_t* ctrl)
     tv.tv_usec = 500 * 1000;
 
     int r = select(ctrl->fd + 1, &rfds, NULL, NULL, &tv);
-    if (r <= 0) {
-        return CTRL_ERR; /* timeout or error */
-    }
+    if (r <= 0) return CTRL_ERR; /* timeout or error */
 
     unsigned char resp = 0;
     ssize_t n = read(ctrl->fd, &resp, 1);
-    if (n == 1 && resp == 0x06) {
-        return CTRL_OK;
-    }
+    if (n == 1 && resp == 0x06) return CTRL_OK;
 
     return CTRL_ERR;
 }
-
-#include <stdio.h>
 
 /* 1行読む（\nまで）。最大 maxlen-1 文字で終端\0を付ける */
 static int read_line(int fd, char* buf, size_t maxlen, int timeout_ms)
@@ -186,3 +167,25 @@ ctrl_result_t ctrl_get_sampling_hz(ctrl_port_t* ctrl, uint32_t* hz_out)
     return CTRL_OK;
 }
 
+/* e コマンドでエラー回数を取得する（仕様: "pulse_error adc_error\r\n"） */
+ctrl_result_t ctrl_get_errors(ctrl_port_t* ctrl, uint32_t* pulse_err, uint32_t* adc_err)
+{
+    if (!ctrl || ctrl->fd < 0 || !pulse_err || !adc_err) return CTRL_ERR;
+
+    tcflush(ctrl->fd, TCIFLUSH);
+
+    const char* cmd = "e\n";
+    if (write(ctrl->fd, cmd, 2) != 2) return CTRL_ERR;
+
+    char line[128];
+    int n = read_line(ctrl->fd, line, sizeof(line), 500);
+    if (n <= 0) return CTRL_ERR;
+
+    /* 例: "0 0\r\n" */
+    unsigned long pe = 0, ae = 0;
+    if (sscanf(line, "%lu %lu", &pe, &ae) != 2) return CTRL_ERR;
+
+    *pulse_err = (uint32_t)pe;
+    *adc_err   = (uint32_t)ae;
+    return CTRL_OK;
+}
