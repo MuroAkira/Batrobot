@@ -19,6 +19,6 @@ output/
 *.log
 *.bin
 *.wav
-
+!output/adc_data/*.wav
 # editor
 .vscode/
