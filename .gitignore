@@ -5,3 +5,20 @@ build/
 *.exe
 *.log
 .vscode/
+# build artifacts
+build/
+output/
+
+# binaries
+*.o
+*.a
+*.out
+*.exe
+
+# logs & data
+*.log
+*.bin
+*.wav
+
+# editor
+.vscode/
