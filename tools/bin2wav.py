@@ -58,11 +58,11 @@ def resample_linear(x: np.ndarray, in_rate: int, out_rate: int) -> np.ndarray:
 
 def main():
     ap = argparse.ArgumentParser(description="Thermophone ADC bin (LH,LL,RH,RL) -> WAV (1MHz) + downsample WAV (48kHz)")
-    ap.add_argument("-i", "--input", default="/home/ubuntu/batrobot/C/output/adc_data/adc_dump_FMsound_duty10.bin", help="input bin path")
+    ap.add_argument("-i", "--input", default="/home/ubuntu/batrobot/C/output/adc_data/adc_dump_FMsound_test2.bin", help="input bin path")
     ap.add_argument("--in-rate", type=int, default=1_000_000, help="input sample rate (Hz), default 1,000,000")
-    ap.add_argument("--out-rate", type=int, default=48_000, help="downsample target (Hz), default 48,000")
-    ap.add_argument("-o1", "--out-wav", default="/home/ubuntu/batrobot/C/output/adc_data/adc_dump_FMsound_duty10.wav", help="output wav (full rate)")
-    ap.add_argument("-o2", "--out-wav48k", default="output/adc_data/adc_dump_48k.wav", help="output wav (48kHz check)")
+    # ap.add_argument("--out-rate", type=int, default=48_000, help="downsample target (Hz), default 48,000")
+    ap.add_argument("-o1", "--out-wav", default="/home/ubuntu/batrobot/C/output/adc_data/adc_dump_FMsound_test2.wav", help="output wav (full rate)")
+
     args = ap.parse_args()
 
     l, r = read_adc_bin_lrrl_be(args.input)
@@ -72,11 +72,11 @@ def main():
     write_wav_int16_stereo(args.out_wav, args.in_rate, l, r)
     print(f"[ok] wrote: {args.out_wav} (rate={args.in_rate}Hz)")
 
-    # 48kHz 確認用WAV（線形補間でリサンプル）
-    l48 = resample_linear(l, args.in_rate, args.out_rate)
-    r48 = resample_linear(r, args.in_rate, args.out_rate)
-    write_wav_int16_stereo(args.out_wav48k, args.out_rate, l48, r48)
-    print(f"[ok] wrote: {args.out_wav48k} (rate={args.out_rate}Hz)")
+    # # 48kHz 確認用WAV（線形補間でリサンプル）
+    # l48 = resample_linear(l, args.in_rate, args.out_rate)
+    # r48 = resample_linear(r, args.in_rate, args.out_rate)
+    # write_wav_int16_stereo(args.out_wav48k, args.out_rate, l48, r48)
+    # print(f"[ok] wrote: {args.out_wav48k} (rate={args.out_rate}Hz)")
 
 if __name__ == "__main__":
     main()
