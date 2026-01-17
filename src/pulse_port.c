@@ -222,6 +222,13 @@ pulse_result_t pulse_write(pulse_port_t* p, const uint8_t* data, size_t len)
     }
     return PULSE_OK;
 }
+/* FMチャープ生成（指数チャープ風の線形近似でもOK）
+   10MHz基準: 1bit=0.1us, LSB first
+   f_start_hz -> f_end_hz, dur_s秒, duty_percent(0..99)
+*/
+size_t pulse_gen_fm_chirp(uint8_t* out, size_t out_bytes,
+                          double f_start_hz, double f_end_hz,
+                          double dur_s, int duty_percent);
 
 
 

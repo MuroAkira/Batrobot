@@ -8,6 +8,9 @@
 #include "ctrl_port.h"
 #include "pulse_port.h"
 #include "adc_port.h"
+#include "crosscorr.h"
+#include <math.h>
+
 
 /* ====== ADC設定（まずはここだけ調整すればOK） ======
    どれだけ読むかは基板側の設定（read_bytes等）と合わせる必要があります */
@@ -16,7 +19,7 @@
 #endif
 
 #ifndef ADC_TIMEOUT_MS
-#define ADC_TIMEOUT_MS (1000)      /* 1000ms */
+#define ADC_TIMEOUT_MS (5000)      /* 1000ms */
 #endif
 
 #ifndef ADC_SLICE_TIMEOUT_MS
@@ -31,6 +34,64 @@ typedef struct {
     int ok;             /* 1=成功 */
     int total_timeout_ms;
 } adc_thread_ctx_t;
+
+static void gen_ref_exp_chirp_1m(float* refN, int N, double fs,
+                                double f0_hz, double f1_hz, double dur_s,
+                                double amp)
+{
+    /* refN は N点。最初の dur_s だけチャープ、残り0 */
+    for (int i=0;i<N;i++) refN[i] = 0.0f;
+
+    int M = (int)floor(dur_s * fs + 0.5);
+    if (M > N) M = N;
+    if (M <= 0) return;
+
+    double r = f1_hz / f0_hz;
+    double ln_r = log(r);
+    if (ln_r == 0.0) {
+        /* f0==f1 のときは単一周波数 */
+        for (int n=0;n<M;n++) {
+            double t = (double)n / fs;
+            refN[n] = (float)(amp * sin(2.0*M_PI*f0_hz*t));
+        }
+        return;
+    }
+
+    /* 位相: phi(t)=2π * f0*T/ln(r) * ( r^(t/T) - 1 ) */
+    for (int n=0;n<M;n++) {
+        double t = (double)n / fs;
+        double x = pow(r, t / dur_s);
+        double phi = 2.0 * M_PI * (f0_hz * dur_s / ln_r) * (x - 1.0);
+        refN[n] = (float)(amp * sin(phi));
+    }
+}
+static int16_t be16_to_i16(const uint8_t hi, const uint8_t lo)
+{
+    uint16_t u = ((uint16_t)hi << 8) | (uint16_t)lo;
+    return (int16_t)u;
+}
+
+/* abuf: [LH LL RH RL] * nsamp */
+static void extract_lr_float_1m(const uint8_t* abuf, size_t abuf_len,
+                                float* L, float* R, int N)
+{
+    /* Nサンプル欲しい → 4*N bytes 必要 */
+    size_t need = (size_t)N * 4u;
+    if (!abuf || abuf_len < need) {
+        for (int i=0;i<N;i++){ L[i]=0.0f; R[i]=0.0f; }
+        return;
+    }
+
+    for (int i=0;i<N;i++) {
+        size_t o = (size_t)i * 4u;
+        int16_t li = be16_to_i16(abuf[o+0], abuf[o+1]);
+        int16_t ri = be16_to_i16(abuf[o+2], abuf[o+3]);
+
+        /* 正規化は任意。まずは -1..1 に */
+        L[i] = (float)li / 32768.0f;
+        R[i] = (float)ri / 32768.0f;
+    }
+}
 
 /* adc_read() を繰り返して指定バイト数まで読み切る（総タイムアウト付き） */
 static int adc_read_exact(adc_port_t* adc, uint8_t* buf, size_t want, int total_timeout_ms)
@@ -225,15 +286,93 @@ int main(void)
 
     /* ===== (F) ADC生データ保存 ===== */
     if (actx.got > 0) {
-        if (save_bin("output/adc_data/adc_dump_test1.bin", abuf, actx.got) != 0) {
+        if (save_bin("output/adc_data/adc_dump_FMsound_test2.bin", abuf, actx.got) != 0) {
             printf("save adc_dump.bin failed\n");
         } else {
             printf("Saved:\n");
-            printf("  output/adc_data/adc_dump.bin\n");
+            printf("  output/adc_data/adc_dump_FMsound_test2.bin\n");
         }
     } else {
         printf("ADC got 0 bytes (nothing to save)\n");
     }
+
+    /* ===== (G) Cross-correlation (L/R) ===== */
+    printf("DEBUG: after save, got=%zu\n", actx.got);
+
+    if (actx.got >= 4u * 32768u) {
+        printf("DEBUG: enter XCORR block\n");
+        const int N = 32768;
+        const double FS = 1000000.0;
+        const double HPF = 35000.0;
+
+        float* ref = (float*)malloc(sizeof(float) * (size_t)N);
+        float* L = (float*)malloc(sizeof(float) * (size_t)N);
+        float* R = (float*)malloc(sizeof(float) * (size_t)N);
+        float* envL = (float*)malloc(sizeof(float) * (size_t)N);
+        float* envR = (float*)malloc(sizeof(float) * (size_t)N);
+
+        if (!ref || !L || !R || !envL || !envR) {
+            printf("xcorr malloc failed\n");
+        } else {
+            /* 参照：95k -> 50k, 8ms */
+            gen_ref_exp_chirp_1m(ref, N, FS, 95000.0, 50000.0, 0.008, 1.0);
+
+            xcorr_ctx_t* xc = xcorr_create(N, FS, HPF);
+            if (!xc) {
+                printf("xcorr_create failed (fftw)\n");
+            } else {
+                xcorr_set_call_time(xc, ref);
+
+                /* まずは先頭から Nサンプル切り出し（後でオフセット調整する） */
+                extract_lr_float_1m(abuf, actx.got, L, R, N);
+
+                xcorr_run_envelope(xc, L, envL);
+                xcorr_run_envelope(xc, R, envR);
+
+                /* 距離範囲（あなたの設定）: 0.51m〜2.55m
+                round-trip samples: t=2d/c, samples=t*Fs */
+                const double c = 340.0;      /* m/s */
+                const double mic = 0.116;    /* m */
+                size_t i0 = (size_t)( (2.0*0.51 / c) * FS );  /* ~3000 */
+                size_t i1 = (size_t)( (2.0*2.55 / c) * FS );  /* ~15000 */
+                if (i1 > (size_t)N) i1 = (size_t)N;
+
+                size_t lTime = xcorr_argmax_range(envL, (size_t)N, i0, i1);
+                size_t rTime = xcorr_argmax_range(envR, (size_t)N, i0, i1);
+
+                double tL = (double)lTime / FS;
+                double tR = (double)rTime / FS;
+
+                /* 距離(m): (tL+tR)*c/4 */
+                double dist = (tL + tR) * c / 4.0;
+
+                /* 角度(rad): asin((tL-tR)*c/mic) */
+                double s = (tL - tR) * c / mic;
+                if (s > 1.0) s = 1.0;
+                if (s < -1.0) s = -1.0;
+                double theta = asin(s);
+                double deg = theta * (180.0 / M_PI);
+
+                printf("XCORR peak: L=%zu R=%zu (range[%zu..%zu))\n", lTime, rTime, i0, i1);
+                printf("XCORR result: dist=%.3f m, angle=%.1f deg\n", dist, deg);
+
+                /* 必要なら env を保存（まずは軽く左だけ） */
+                FILE* fe = fopen("output/adc_data/xcorr_envL.txt", "w");
+                if (fe) {
+                    for (int i=0;i<N;i++) fprintf(fe, "%d %.6f\n", i, envL[i]);
+                    fclose(fe);
+                    printf("Saved: output/adc_data/xcorr_envL.txt\n");
+                }
+
+                xcorr_destroy(xc);
+            }
+        }
+
+        free(ref); free(L); free(R); free(envL); free(envR);
+    } else {
+        printf("XCORR skipped: need at least %u bytes, got=%zu\n", 4u*32768u, actx.got);
+    }
+
 
     /* 後片付け */
     free(abuf);

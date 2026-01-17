@@ -8,7 +8,7 @@ OBJS := $(patsubst src/%.c,build/%.o,$(SRCS))
 all: $(TARGET)
 
 $(TARGET): $(OBJS) | build
-	$(CC) $(OBJS) -o $@
+	$(CC) $(OBJS) -o $@ -lfftw3f -lm
 
 build/%.o: src/%.c | build
 	$(CC) $(CFLAGS) -c $< -o $@
