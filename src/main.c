@@ -108,6 +108,7 @@ int main(void)
     /* ===== (B) パルス生成 ===== */
     typedef enum { MODE_CF, MODE_FM } mode_t;
     mode_t mode = MODE_FM;   /* ここ一行で切替 */
+    printf("PULSE mode: %s\n", (mode==MODE_FM) ? "FM" : "CF");
 
     /* 10MHz bit clock */
     const double FS_BIT = 10e6;
@@ -258,7 +259,7 @@ int main(void)
 
     /* ===== (F) ADC生データ保存 ===== */
     if (actx.got > 0) {
-        if (save_bin("output/adc_data/adc_dump_FM_test2_duty40.bin", abuf, actx.got) != 0) {
+        if (save_bin("output/adc_data/adc_dump_FM_test3_duty40.bin", abuf, actx.got) != 0) {
             printf("save adc_dump.bin failed\n");
         } else {
             printf("Saved:\n");
