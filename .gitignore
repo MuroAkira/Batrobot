@@ -1,13 +1,8 @@
-build/
-*.o
-*.a
-*.out
-*.exe
-*.log
-.vscode/
 # build artifacts
 build/
-output/
+
+# editor
+.vscode/
 
 # binaries
 *.o
@@ -18,7 +13,14 @@ output/
 # logs & data
 *.log
 *.bin
+
+# ---- wav files ----
+# 基本は無視
 *.wav
+
+# 親ディレクトリを許可
+!output/
+!output/adc_data/
+
+# このフォルダの wav だけ管理
 !output/adc_data/*.wav
-# editor
-.vscode/
