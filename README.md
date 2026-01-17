@@ -15,12 +15,6 @@ Raspberry Pi など Linux 環境で動かし、ADC から生データを取得�
 
 ---
 
-## ⚠️ 注意（Safety）
-
-- **Level2 以降は音が出る可能性があります。**  
-  必ず手動で確認・了承を取ってから進めてください。:contentReference[oaicite:3]{index=3}
-- 実機接続には権限（`dialout` 等のシリアルアクセス）が必要です。
-
 ---
 
 ## 🗂 リポジトリ構成
