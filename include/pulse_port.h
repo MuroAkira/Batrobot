@@ -25,4 +25,11 @@ pulse_result_t pulse_write(pulse_port_t* p, const uint8_t* data, size_t len);
    10MHz基準: 1bit=0.1us, LSB first */
 size_t pulse_gen_pfd(uint8_t* out, size_t out_bytes, int freq_khz, int duty_percent);
 
+size_t pulse_bytes_for_duration(double fs_bit, double dur_s);
+
+size_t pulse_gen_exp_chirp(uint8_t* out, size_t out_bytes,
+                           double fs_bit, double dur_s,
+                           double f_start_hz, double f_end_hz,
+                           int duty_percent);
+
 #endif /* PULSE_PORT_H */

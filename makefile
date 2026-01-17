@@ -11,7 +11,7 @@ $(TARGET): $(OBJS) | build
 	$(CC) $(OBJS) -o $@ -lfftw3f -lm
 
 build/%.o: src/%.c | build
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@ -lm
 
 build:
 	mkdir -p build

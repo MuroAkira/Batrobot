@@ -8,9 +8,6 @@
 #include "ctrl_port.h"
 #include "pulse_port.h"
 #include "adc_port.h"
-#include "crosscorr.h"
-#include <math.h>
-
 
 /* ====== ADC設定（まずはここだけ調整すればOK） ======
    どれだけ読むかは基板側の設定（read_bytes等）と合わせる必要があります */
@@ -18,13 +15,14 @@
 #define ADC_READ_BYTES (256000)     /* 64ms fs 1Mhz */
 #endif
 
-#ifndef ADC_TIMEOUT_MS
-#define ADC_TIMEOUT_MS (5000)      /* 1000ms */
+#ifndef ADC_START_TIMEOUT_MS
+#define ADC_START_TIMEOUT_MS (500)   /* 最初の1byte待ち */
 #endif
 
-#ifndef ADC_SLICE_TIMEOUT_MS
-#define ADC_SLICE_TIMEOUT_MS (50)  /* select待ち（小刻みに回す） */
+#ifndef ADC_IDLE_TIMEOUT_MS
+#define ADC_IDLE_TIMEOUT_MS  (2000)   /* 途中の無通信が続いたら失敗 */
 #endif
+
 
 typedef struct {
     adc_port_t* adc;
@@ -32,96 +30,33 @@ typedef struct {
     size_t want;
     size_t got;
     int ok;             /* 1=成功 */
-    int total_timeout_ms;
+
 } adc_thread_ctx_t;
 
-static void gen_ref_exp_chirp_1m(float* refN, int N, double fs,
-                                double f0_hz, double f1_hz, double dur_s,
-                                double amp)
-{
-    /* refN は N点。最初の dur_s だけチャープ、残り0 */
-    for (int i=0;i<N;i++) refN[i] = 0.0f;
-
-    int M = (int)floor(dur_s * fs + 0.5);
-    if (M > N) M = N;
-    if (M <= 0) return;
-
-    double r = f1_hz / f0_hz;
-    double ln_r = log(r);
-    if (ln_r == 0.0) {
-        /* f0==f1 のときは単一周波数 */
-        for (int n=0;n<M;n++) {
-            double t = (double)n / fs;
-            refN[n] = (float)(amp * sin(2.0*M_PI*f0_hz*t));
-        }
-        return;
-    }
-
-    /* 位相: phi(t)=2π * f0*T/ln(r) * ( r^(t/T) - 1 ) */
-    for (int n=0;n<M;n++) {
-        double t = (double)n / fs;
-        double x = pow(r, t / dur_s);
-        double phi = 2.0 * M_PI * (f0_hz * dur_s / ln_r) * (x - 1.0);
-        refN[n] = (float)(amp * sin(phi));
-    }
-}
-static int16_t be16_to_i16(const uint8_t hi, const uint8_t lo)
-{
-    uint16_t u = ((uint16_t)hi << 8) | (uint16_t)lo;
-    return (int16_t)u;
-}
-
-/* abuf: [LH LL RH RL] * nsamp */
-static void extract_lr_float_1m(const uint8_t* abuf, size_t abuf_len,
-                                float* L, float* R, int N)
-{
-    /* Nサンプル欲しい → 4*N bytes 必要 */
-    size_t need = (size_t)N * 4u;
-    if (!abuf || abuf_len < need) {
-        for (int i=0;i<N;i++){ L[i]=0.0f; R[i]=0.0f; }
-        return;
-    }
-
-    for (int i=0;i<N;i++) {
-        size_t o = (size_t)i * 4u;
-        int16_t li = be16_to_i16(abuf[o+0], abuf[o+1]);
-        int16_t ri = be16_to_i16(abuf[o+2], abuf[o+3]);
-
-        /* 正規化は任意。まずは -1..1 に */
-        L[i] = (float)li / 32768.0f;
-        R[i] = (float)ri / 32768.0f;
-    }
-}
-
-/* adc_read() を繰り返して指定バイト数まで読み切る（総タイムアウト付き） */
-static int adc_read_exact(adc_port_t* adc, uint8_t* buf, size_t want, int total_timeout_ms)
+/* 指定バイト数を「開始待ち + 活動タイムアウト」で読み切る
+   戻り値:  want(成功) / 0..want-1(途中まで) / -1(エラー) */
+static int adc_read_exact(adc_port_t* adc, uint8_t* buf, size_t want,
+                          int start_timeout_ms, int idle_timeout_ms)
 {
     if (!adc || !buf || want == 0) return -1;
 
     size_t got = 0;
-    int elapsed = 0;
 
+    /* 1) 開始待ち：最初のデータが来るまで */
+    int n = adc_read(adc, buf, want, start_timeout_ms);
+    if (n < 0) return -1;
+    if (n == 0) return 0;          /* 何も来なかった */
+    got += (size_t)n;
+
+    /* 2) 活動タイムアウト：データが来ている間は継続、途切れたら終了 */
     while (got < want) {
-        int slice = ADC_SLICE_TIMEOUT_MS;
-        if (elapsed + slice > total_timeout_ms) {
-            slice = total_timeout_ms - elapsed;
-            if (slice <= 0) break;
-        }
-
-        int n = adc_read(adc, buf + got, want - got, slice);
-        if (n < 0) {
-            return -1; /* read error */
-        }
-        if (n == 0) {
-            /* timeout/no data in this slice */
-            elapsed += slice;
-            continue;
-        }
-        got += (size_t)n;
-        /* データが来ている間は elapsed を進めない（実質“活動タイムアウト”にする） */
+        int m = adc_read(adc, buf + got, want - got, idle_timeout_ms);
+        if (m < 0) return -1;
+        if (m == 0) return (int)got;  /* 途中で途切れた */
+        got += (size_t)m;
     }
 
-    return (got == want) ? 0 : (int)got; /* 0=成功、>0=途中まで、<0=失敗 */
+    return (int)got;
 }
 
 static void* adc_reader_thread(void* arg)
@@ -130,14 +65,15 @@ static void* adc_reader_thread(void* arg)
     ctx->ok = 0;
     ctx->got = 0;
 
-    int rc = adc_read_exact(ctx->adc, ctx->buf, ctx->want, ctx->total_timeout_ms);
-    if (rc == 0) {
+    int rc = adc_read_exact(ctx->adc, ctx->buf, ctx->want,ADC_START_TIMEOUT_MS, ADC_IDLE_TIMEOUT_MS);
+
+    if (rc == (int)ctx->want) {  // 成功
         ctx->ok = 1;
         ctx->got = ctx->want;
-    } else if (rc > 0) {
+    } else if (rc >= 0) {        // 未完了（途中まで）
         ctx->ok = 0;
         ctx->got = (size_t)rc;
-    } else {
+    } else {                     // エラー
         ctx->ok = 0;
         ctx->got = 0;
     }
@@ -170,19 +106,33 @@ int main(void)
     printf("AMP gain set: g=300\n");
 
     /* ===== (B) パルス生成 ===== */
-    size_t pb = 50000;              /* 40ms（あなたのデフォルト） */
-    int freq_khz = 40;
-    int duty_percent = 40;           /* 鳴る安全値。0にすれば全LOW確認にも使える */
+    typedef enum { MODE_CF, MODE_FM } mode_t;
+    mode_t mode = MODE_FM;   /* ここ一行で切替 */
 
-    uint8_t* pbuf = (uint8_t*)malloc(pb);
-    if (!pbuf) { printf("malloc failed\n"); return 1; }
+    /* 10MHz bit clock */
+    const double FS_BIT = 10e6;
+    int duty_percent = 40; /* 10% */
 
-    size_t wbytes = pulse_gen_pfd(pbuf, pb, freq_khz, duty_percent);
-    if (wbytes == 0) {
-        printf("pulse_gen_pfd failed (freq=%d duty=%d)\n", freq_khz, duty_percent);
-        free(pbuf);
-        return 1;
+
+    size_t pb;
+    if (mode == MODE_CF) {
+        pb = 50000; /* 40ms固定 */
+    } else {
+        double dur = 0.008; /* 8ms */
+        pb = pulse_bytes_for_duration(FS_BIT, dur);
     }
+
+    /* 既存の安全ゲート len<=50000 を超えないことも自然に満たす */
+    uint8_t* pbuf = malloc(pb);
+
+    size_t wbytes = 0;
+    if (mode == MODE_CF) {
+        wbytes = pulse_gen_pfd(pbuf, pb, 40, duty_percent);
+    } else {
+        wbytes = pulse_gen_exp_chirp(pbuf, pb, FS_BIT, 0.008,
+                                    95000.0, 50000.0, duty_percent);
+    }
+
 
     /* duty推定（全体の1比率） */
     unsigned long ones = 0;
@@ -196,20 +146,29 @@ int main(void)
 
    
     /* 保存（0/1：ビット列確認用） */
-    FILE *fb = fopen("output/pulse_data/pulse_raw_bits.txt", "w");
-    if (!fb) { perror("fopen bits"); free(pbuf); return 1; }
-    size_t total_bits = pb * 8;
-    for (size_t bit = 0; bit < total_bits; bit++) {
+    
+    /* ==== パルス生データ保存（確認用） ==== */
+    FILE *fp = fopen("output/pulse_data/pulse_bytes.bin", "wb");
+    if (!fp) { perror("fopen pulse_bytes.bin"); return 1; }
+    fwrite(pbuf, 1, wbytes, fp);
+    fclose(fp);
+
+    /* ビット列も保存（LSB first） */
+    FILE *fb = fopen("output/pulse_data/pulse_bits.txt", "w");
+    if (!fb) { perror("fopen pulse_bits.txt"); return 1; }
+
+    for (size_t bit = 0; bit < wbytes * 8; bit++) {
         size_t byte_i = bit / 8;
-        int bit_i = (int)(bit % 8); /* LSB first */
+        int bit_i = (int)(bit % 8);
         int v = (pbuf[byte_i] >> bit_i) & 1;
         fputc(v ? '1' : '0', fb);
         if ((bit + 1) % 100 == 0) fputc('\n', fb);
     }
     fclose(fb);
 
-    printf("Saved:\n");
-    printf("  output/pulse_data/pulse_raw_real_device2.txt\n");
+    printf("Saved pulse:\n");
+    printf("  output/pulse_data/pulse_bytes.bin\n");
+    printf("  output/pulse_data/pulse_bits.txt\n");
 
     /* ===== (C) ADC開始（パルスより先に読む準備） ===== */
     adc_port_t* adc = adc_open(ADC_DEVICE_PATH, ADC_BAUDRATE);
@@ -239,7 +198,7 @@ int main(void)
     actx.adc = adc;
     actx.buf = abuf;
     actx.want = ADC_READ_BYTES;
-    actx.total_timeout_ms = ADC_TIMEOUT_MS;
+
 
     pthread_t th;
     if (pthread_create(&th, NULL, adc_reader_thread, &actx) != 0) {
@@ -249,6 +208,13 @@ int main(void)
         free(pbuf);
         return 1;
     }
+    uint32_t pe0=0, ae0=0, pe1=0, ae1=0;
+
+    ctrl_port_t* ce0 = ctrl_open(CTRL_DEVICE_PATH, CTRL_BAUDRATE);
+    if (ce0 && ctrl_get_errors(ce0, &pe0, &ae0) == CTRL_OK) {
+        printf("ERR(before): pulse=%u adc=%u\n", pe0, ae0);
+    }
+    if (ce0) ctrl_close(ce0);
 
     /* ===== (D) パルス送信（PortA） ===== */
     pulse_port_t* pulse = pulse_open(PULSE_DEVICE_PATH, PULSE_BAUDRATE);
@@ -277,6 +243,12 @@ int main(void)
 
     /* ===== (E) ADC完了待ち ===== */
     pthread_join(th, NULL);
+    ctrl_port_t* ce1 = ctrl_open(CTRL_DEVICE_PATH, CTRL_BAUDRATE);
+    if (ce1 && ctrl_get_errors(ce1, &pe1, &ae1) == CTRL_OK) {
+        printf("ERR(after):  pulse=%u adc=%u\n", pe1, ae1);
+        printf("ERR(delta):  pulse=%d adc=%d\n", (int)(pe1-pe0), (int)(ae1-ae0));
+    }
+    if (ce1) ctrl_close(ce1);
 
     if (actx.ok) {
         printf("ADC read OK (%zu bytes)\n", actx.got);
@@ -286,93 +258,15 @@ int main(void)
 
     /* ===== (F) ADC生データ保存 ===== */
     if (actx.got > 0) {
-        if (save_bin("output/adc_data/adc_dump_FMsound_test2.bin", abuf, actx.got) != 0) {
+        if (save_bin("output/adc_data/adc_dump_FM_test2_duty40.bin", abuf, actx.got) != 0) {
             printf("save adc_dump.bin failed\n");
         } else {
             printf("Saved:\n");
-            printf("  output/adc_data/adc_dump_FMsound_test2.bin\n");
+            printf("  output/adc_data/adc_dump.bin\n");
         }
     } else {
         printf("ADC got 0 bytes (nothing to save)\n");
     }
-
-    /* ===== (G) Cross-correlation (L/R) ===== */
-    printf("DEBUG: after save, got=%zu\n", actx.got);
-
-    if (actx.got >= 4u * 32768u) {
-        printf("DEBUG: enter XCORR block\n");
-        const int N = 32768;
-        const double FS = 1000000.0;
-        const double HPF = 35000.0;
-
-        float* ref = (float*)malloc(sizeof(float) * (size_t)N);
-        float* L = (float*)malloc(sizeof(float) * (size_t)N);
-        float* R = (float*)malloc(sizeof(float) * (size_t)N);
-        float* envL = (float*)malloc(sizeof(float) * (size_t)N);
-        float* envR = (float*)malloc(sizeof(float) * (size_t)N);
-
-        if (!ref || !L || !R || !envL || !envR) {
-            printf("xcorr malloc failed\n");
-        } else {
-            /* 参照：95k -> 50k, 8ms */
-            gen_ref_exp_chirp_1m(ref, N, FS, 95000.0, 50000.0, 0.008, 1.0);
-
-            xcorr_ctx_t* xc = xcorr_create(N, FS, HPF);
-            if (!xc) {
-                printf("xcorr_create failed (fftw)\n");
-            } else {
-                xcorr_set_call_time(xc, ref);
-
-                /* まずは先頭から Nサンプル切り出し（後でオフセット調整する） */
-                extract_lr_float_1m(abuf, actx.got, L, R, N);
-
-                xcorr_run_envelope(xc, L, envL);
-                xcorr_run_envelope(xc, R, envR);
-
-                /* 距離範囲（あなたの設定）: 0.51m〜2.55m
-                round-trip samples: t=2d/c, samples=t*Fs */
-                const double c = 340.0;      /* m/s */
-                const double mic = 0.116;    /* m */
-                size_t i0 = (size_t)( (2.0*0.51 / c) * FS );  /* ~3000 */
-                size_t i1 = (size_t)( (2.0*2.55 / c) * FS );  /* ~15000 */
-                if (i1 > (size_t)N) i1 = (size_t)N;
-
-                size_t lTime = xcorr_argmax_range(envL, (size_t)N, i0, i1);
-                size_t rTime = xcorr_argmax_range(envR, (size_t)N, i0, i1);
-
-                double tL = (double)lTime / FS;
-                double tR = (double)rTime / FS;
-
-                /* 距離(m): (tL+tR)*c/4 */
-                double dist = (tL + tR) * c / 4.0;
-
-                /* 角度(rad): asin((tL-tR)*c/mic) */
-                double s = (tL - tR) * c / mic;
-                if (s > 1.0) s = 1.0;
-                if (s < -1.0) s = -1.0;
-                double theta = asin(s);
-                double deg = theta * (180.0 / M_PI);
-
-                printf("XCORR peak: L=%zu R=%zu (range[%zu..%zu))\n", lTime, rTime, i0, i1);
-                printf("XCORR result: dist=%.3f m, angle=%.1f deg\n", dist, deg);
-
-                /* 必要なら env を保存（まずは軽く左だけ） */
-                FILE* fe = fopen("output/adc_data/xcorr_envL.txt", "w");
-                if (fe) {
-                    for (int i=0;i<N;i++) fprintf(fe, "%d %.6f\n", i, envL[i]);
-                    fclose(fe);
-                    printf("Saved: output/adc_data/xcorr_envL.txt\n");
-                }
-
-                xcorr_destroy(xc);
-            }
-        }
-
-        free(ref); free(L); free(R); free(envL); free(envR);
-    } else {
-        printf("XCORR skipped: need at least %u bytes, got=%zu\n", 4u*32768u, actx.got);
-    }
-
 
     /* 後片付け */
     free(abuf);

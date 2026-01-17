@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <math.h>
 
 struct pulse_port {
     int fd;
@@ -32,6 +33,66 @@ static int is_safe_devpath(const char* p)
     if (strcmp(p, "/dev/ttyUSB0") == 0) return 1;
 
     return 0;
+}
+
+size_t pulse_bytes_for_duration(double fs_bit, double dur_s)
+{
+    if (fs_bit <= 0.0 || dur_s <= 0.0) return 0;
+    double bits = fs_bit * dur_s;
+    if (bits < 1.0) bits = 1.0;
+    size_t nbits = (size_t)llround(bits);
+    return (nbits + 7u) / 8u;
+}
+
+/* 10MHzビット列で指数チャープを“周期変化する矩形波”として生成 */
+size_t pulse_gen_exp_chirp(uint8_t* out, size_t out_bytes,
+                           double fs_bit, double dur_s,
+                           double f_start_hz, double f_end_hz,
+                           int duty_percent)
+{
+    if (!out || out_bytes == 0) return 0;
+    if (fs_bit <= 0.0 || dur_s <= 0.0) return 0;
+    if (f_start_hz <= 0.0 || f_end_hz <= 0.0) return 0;
+    if (duty_percent < 0 || duty_percent > 99) return 0;
+
+    memset(out, 0x00, out_bytes);
+    if (duty_percent == 0) return out_bytes;
+
+    size_t total_bits = out_bytes * 8u;
+    size_t chirp_bits = (size_t)llround(fs_bit * dur_s);
+    if (chirp_bits > total_bits) chirp_bits = total_bits;
+
+    /* f(t)=f0*(f1/f0)^(t/T) */
+    double r = f_end_hz / f_start_hz;
+    double T = dur_s;
+
+    size_t bit = 0;
+    while (bit < chirp_bits) {
+        double t = (double)bit / fs_bit;
+        double f = f_start_hz * pow(r, t / T);
+        if (f < 1.0) f = 1.0;
+
+        int period_bits = (int)llround(fs_bit / f);
+        if (period_bits < 1) period_bits = 1;
+
+        int on_bits = (period_bits * duty_percent + 50) / 100;
+        if (on_bits < 1) on_bits = 1;
+        if (on_bits >= period_bits) on_bits = period_bits - 1;
+
+        for (int p = 0; p < period_bits && bit < chirp_bits; p++, bit++) {
+            if (p < on_bits) {
+                size_t byte_i = bit / 8u;
+                int bit_i = (int)(bit % 8u);
+                out[byte_i] |= (uint8_t)(1u << bit_i);
+            }
+        }
+    }
+
+    fprintf(stderr,
+            "pulse_gen_exp_chirp: f_start=%.0f f_end=%.0f dur=%.3fms duty=%d%% bytes=%zu\n",
+            f_start_hz, f_end_hz, dur_s*1000.0, duty_percent, out_bytes);
+
+    return out_bytes;
 }
 
 
@@ -222,13 +283,6 @@ pulse_result_t pulse_write(pulse_port_t* p, const uint8_t* data, size_t len)
     }
     return PULSE_OK;
 }
-/* FMチャープ生成（指数チャープ風の線形近似でもOK）
-   10MHz基準: 1bit=0.1us, LSB first
-   f_start_hz -> f_end_hz, dur_s秒, duty_percent(0..99)
-*/
-size_t pulse_gen_fm_chirp(uint8_t* out, size_t out_bytes,
-                          double f_start_hz, double f_end_hz,
-                          double dur_s, int duty_percent);
 
 
 
