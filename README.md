@@ -1,6 +1,6 @@
 new_bat_robotの説明書
 
-・ファイル構造：
+#ファイル構造：
 C/
 ├─ Makefile
 ├─ README.md
