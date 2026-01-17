@@ -24,3 +24,6 @@ build/
 
 # このフォルダの wav だけ管理
 !output/adc_data/*.wav
+
+# generated outputs
+output/

@@ -113,12 +113,12 @@ int main(void)
     const double FS_BIT = 10e6;
 
     /* FM設定 */
-    double dur = 0.008;          /* 8ms */
+    double dur = 0.002;          /* 8ms */
     double f_start = 95000.0;    /* 95kHz */
     double f_end   = 50000.0;    /* 50kHz */
 
     /* duty（安全ゲート60%未満で） */
-    int duty_percent = 10;
+    int duty_percent = 40;
 
     size_t pb;
     size_t wbytes = 0;
@@ -271,7 +271,7 @@ int main(void)
 
     /* ===== (F) ADC生データ保存 ===== */
     if (actx.got > 0) {
-        if (save_bin("output/adc_data/adc_FM_test5.bin", abuf, actx.got) != 0) {
+        if (save_bin("output/adc_data/adc_FM_test9.bin", abuf, actx.got) != 0) {
             printf("save adc_FM_test.bin failed\n");
         } else {
             printf("Saved:\n");

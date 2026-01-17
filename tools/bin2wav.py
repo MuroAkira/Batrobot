@@ -58,10 +58,10 @@ def resample_linear(x: np.ndarray, in_rate: int, out_rate: int) -> np.ndarray:
 
 def main():
     ap = argparse.ArgumentParser(description="Thermophone ADC bin (LH,LL,RH,RL) -> WAV (1MHz) + downsample WAV (48kHz)")
-    ap.add_argument("-i", "--input", default="/home/ubuntu/batrobot/C/output/adc_data/adc_dump_FM_test3_duty40.bin", help="input bin path")
+    ap.add_argument("-i", "--input", default="/home/ubuntu/batrobot/C/output/adc_data/adc_FM_test9.bin", help="input bin path")
     ap.add_argument("--in-rate", type=int, default=1_000_000, help="input sample rate (Hz), default 1,000,000")
     # ap.add_argument("--out-rate", type=int, default=48_000, help="downsample target (Hz), default 48,000")
-    ap.add_argument("-o1", "--out-wav", default="/home/ubuntu/batrobot/C/output/adc_data/adc_dump_FM_test3_duty40.wav", help="output wav (full rate)")
+    ap.add_argument("-o1", "--out-wav", default="/home/ubuntu/batrobot/C/output/adc_data/adc_FM_test9.wav", help="output wav (full rate)")
 
     args = ap.parse_args()
 

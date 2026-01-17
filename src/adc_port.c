@@ -75,13 +75,31 @@ adc_result_t adc_flush(adc_port_t* adc)
     return ADC_OK;
 }
 
+#include <errno.h>
+#include <sys/select.h>
+
 int adc_read(adc_port_t* adc, uint8_t* buf, size_t len, int timeout_ms)
 {
-    (void)timeout_ms; /* ブロッキングにするので使わない */
-    if (!adc || adc->fd < 0 || !buf) return -1;
+    if (!adc || adc->fd < 0 || !buf || len == 0) return -1;
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(adc->fd, &rfds);
+
+    struct timeval tv;
+    tv.tv_sec  = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int r = select(adc->fd + 1, &rfds, NULL, NULL, &tv);
+    if (r == 0) return 0;      // timeout
+    if (r < 0) return -1;      // select error
 
     ssize_t n = read(adc->fd, buf, len);
-    if (n < 0) return -1;
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        return -1;
+    }
     return (int)n;
 }
+
 
